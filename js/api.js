@@ -18,26 +18,42 @@ const EVIDENCE_KW = ['study', 'research', 'data', 'evidence', 'statistic', 'perc
 const REASONING_KW = ['because', 'therefore', 'thus', 'hence', 'consequently', 'as a result', 'this means', 'which leads to'];
 
 async function analyzeArgument(text, format, topic, history) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
   try {
     const res = await fetch(`${API_BASE}/analyze`, { 
       method: 'POST', 
       headers: { 'Content-Type': 'application/json' }, 
-      body: JSON.stringify({ text, format, topic, history }) 
+      body: JSON.stringify({ text, format, topic, history }),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
     if (res.ok) return await res.json();
-  } catch (e) {}
+  } catch (e) {
+    console.warn('AI Analysis failed or timed out, using fallback:', e.message);
+  } finally {
+    clearTimeout(timeoutId);
+  }
   return clientAnalysis(text);
 }
 
 async function getCounterArgument(text, format, history, topic) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
   try {
     const res = await fetch(`${API_BASE}/debate`, { 
       method: 'POST', 
       headers: { 'Content-Type': 'application/json' }, 
-      body: JSON.stringify({ text, format, history, topic }) 
+      body: JSON.stringify({ text, format, history, topic }),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
     if (res.ok) return await res.json();
-  } catch (e) {}
+  } catch (e) {
+    console.warn('AI Counter failed or timed out:', e.message);
+  } finally {
+    clearTimeout(timeoutId);
+  }
   return clientCounter(text);
 }
 
