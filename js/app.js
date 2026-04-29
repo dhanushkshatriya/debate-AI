@@ -122,28 +122,37 @@ async function submitArgument() {
   const topic = document.getElementById('debate-topic').value;
   if (!text) { showToast('Please enter an argument first', 'error'); return; }
   if (text.length < 10) { showToast('Argument too short. Write at least a sentence.', 'error'); return; }
-  if (debateStatus !== 'ongoing') { showToast('This debate has concluded.', 'info'); return; }
-
   const btn = document.getElementById('analyze-btn');
   btn.disabled = true;
   btn.innerHTML = '<span class="loading-spinner"></span> Thinking...';
 
-  // Add user argument to history
-  currentHistory.push({ role: 'user', content: text });
-
-  // Stop recording if active
-  let speechData = null;
+  // Stop recording if active and start speech analysis
+  let speechPromise = Promise.resolve(null);
   if (typeof isRecording !== 'undefined' && isRecording) {
     const r = stopRecording();
-    speechDuration = r.duration;
-    if (speechDuration > 2) speechData = await analyzeSpeechAPI(text, speechDuration);
+    if (r.duration > 2) {
+      speechPromise = analyzeSpeechAPI(text, r.duration);
+    }
   }
 
+  // Unified analysis and counter-argument generation
+  const analysisPromise = analyzeArgument(text, currentFormat, topic, currentHistory);
+
   try {
-    const analysis = await analyzeArgument(text, currentFormat);
-    const counterRes = await getCounterArgument(text, currentFormat, currentHistory, topic);
+    const [analysis, speechDataResult] = await Promise.all([
+      analysisPromise,
+      speechPromise
+    ]);
     
-    if (counterRes) {
+    speechData = speechDataResult;
+    
+    if (analysis) {
+      // Use counter_argument from analysis (it's contextual now)
+      const counterRes = {
+        counter_argument: analysis.counter_argument,
+        reasoning: analysis.counter_reasoning,
+        status: analysis.status || 'ongoing'
+      };
       currentHistory.push({ role: 'ai', content: counterRes.counter_argument });
       debateStatus = counterRes.status || 'ongoing';
       

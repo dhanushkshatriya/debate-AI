@@ -4,6 +4,8 @@ from typing import List, Optional
 class AnalyzeRequest(BaseModel):
     text: str
     format: str = "casual"
+    topic: str = "General"
+    history: list = []
 
 class DebateRequest(BaseModel):
     text: str

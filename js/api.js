@@ -17,9 +17,13 @@ const FALLACY_PATTERNS = [
 const EVIDENCE_KW = ['study', 'research', 'data', 'evidence', 'statistic', 'percent', 'report', 'survey', 'found that', 'according to', 'source', 'published'];
 const REASONING_KW = ['because', 'therefore', 'thus', 'hence', 'consequently', 'as a result', 'this means', 'which leads to'];
 
-async function analyzeArgument(text, format) {
+async function analyzeArgument(text, format, topic, history) {
   try {
-    const res = await fetch(`${API_BASE}/analyze`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, format }) });
+    const res = await fetch(`${API_BASE}/analyze`, { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify({ text, format, topic, history }) 
+    });
     if (res.ok) return await res.json();
   } catch (e) {}
   return clientAnalysis(text);
