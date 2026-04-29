@@ -83,7 +83,7 @@ async def ai_analyze(text: str, topic: str = "General", history: list = None, fm
     try:
         hist_str = "\n".join([f"{m['role']}: {m['content']}" for m in (history or [])])
         prompt = ANALYSIS_PROMPT.replace("{text}", text).replace("{format}", fmt).replace("{topic}", topic).replace("{history}", hist_str)
-        response = model.generate_content(prompt)
+        response = await model.generate_content_async(prompt)
         raw = response.text.strip()
         if raw.startswith("```"):
             raw = re.sub(r"^```\w*\n?", "", raw)
@@ -100,7 +100,7 @@ async def ai_counter(text: str, topic: str, history: list, fmt: str = "casual") 
     try:
         hist_str = "\n".join([f"{m['role']}: {m['content']}" for m in history])
         prompt = COUNTER_PROMPT.replace("{text}", text).replace("{format}", fmt).replace("{topic}", topic).replace("{history}", hist_str)
-        response = model.generate_content(prompt)
+        response = await model.generate_content_async(prompt)
         raw = response.text.strip()
         if raw.startswith("```"):
             raw = re.sub(r"^```\w*\n?", "", raw)
@@ -117,7 +117,7 @@ async def ai_evaluate_debate(topic: str, history: list) -> Optional[dict]:
     try:
         hist_str = "\n".join([f"{m['role']}: {m['content']}" for m in history])
         prompt = DEBATE_EVAL_PROMPT.replace("{topic}", topic).replace("{history}", hist_str)
-        response = model.generate_content(prompt)
+        response = await model.generate_content_async(prompt)
         raw = response.text.strip()
         if raw.startswith("```"):
             raw = re.sub(r"^```\w*\n?", "", raw)
