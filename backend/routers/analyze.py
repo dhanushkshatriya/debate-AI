@@ -55,7 +55,7 @@ def fallback_analyze(text: str) -> dict:
 
 @router.post("/analyze")
 async def analyze(req: AnalyzeRequest):
-    result = await ai_analyze(req.text, req.topic, req.history, req.format)
+    result = await ai_analyze(req.text, req.format)
     if not result:
         result = fallback_analyze(req.text)
     return result

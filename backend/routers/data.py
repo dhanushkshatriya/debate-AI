@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
-from db import supabase
+from db import db
 from datetime import datetime
 
 router = APIRouter()
@@ -24,22 +24,22 @@ class DebateCreate(BaseModel):
 async def get_profile(req: dict):
     email = req.get("email")
     try:
-        res = supabase.table("users").select("*").eq("email", email).execute()
-        if len(res.data) == 0:
+        doc = db.collection("users").document(email).get()
+        if not doc.exists:
             return {"success": False, "error": "User not found."}
-        return {"success": True, "profile": res.data[0]}
+        return {"success": True, "profile": doc.to_dict()}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 @router.put("/data/profile")
 async def update_profile(req: ProfileUpdate):
     try:
-        # Get current user
-        res = supabase.table("users").select("*").eq("email", req.email).execute()
-        if len(res.data) == 0:
+        doc_ref = db.collection("users").document(req.email)
+        doc = doc_ref.get()
+        if not doc.exists:
             return {"success": False, "error": "User not found."}
             
-        user = res.data[0]
+        user = doc.to_dict()
         updates = {}
         if req.xp is not None:
             updates["xp"] = user.get("xp", 0) + req.xp
@@ -52,7 +52,7 @@ async def update_profile(req: ProfileUpdate):
             updates["total_debates"] = user.get("total_debates", 0) + 1
             
         if updates:
-            supabase.table("users").update(updates).eq("email", req.email).execute()
+            doc_ref.update(updates)
             
         return {"success": True}
     except Exception as e:
@@ -62,8 +62,13 @@ async def update_profile(req: ProfileUpdate):
 async def get_debates(req: dict):
     email = req.get("email")
     try:
-        res = supabase.table("debates").select("*").eq("user_email", email).order("created_at", desc=True).execute()
-        return {"success": True, "debates": res.data}
+        debates = []
+        docs = db.collection("users").document(email).collection("debates").order_by("created_at", direction="DESCENDING").stream()
+        for doc in docs:
+            d = doc.to_dict()
+            d["id"] = doc.id
+            debates.append(d)
+        return {"success": True, "debates": debates}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -71,7 +76,6 @@ async def get_debates(req: dict):
 async def add_debate(req: DebateCreate):
     try:
         new_debate = {
-            "user_email": req.email,
             "topic": req.topic,
             "format": req.format,
             "argument": req.argument,
@@ -84,7 +88,7 @@ async def add_debate(req: DebateCreate):
             "counter_argument": req.counter,
             "created_at": datetime.utcnow().isoformat()
         }
-        res = supabase.table("debates").insert(new_debate).execute()
-        return {"success": True, "debate": res.data[0]}
+        db.collection("users").document(req.email).collection("debates").add(new_debate)
+        return {"success": True, "debate": new_debate}
     except Exception as e:
         return {"success": False, "error": str(e)}

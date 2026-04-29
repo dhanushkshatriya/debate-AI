@@ -1,5 +1,6 @@
-// API service with client-side fallback analysis
+// API service with client-side fallback analysis and FAST timeouts
 const API_BASE = '/api';
+const FETCH_TIMEOUT = 30000; // 30 second max
 
 const FALLACY_PATTERNS = [
   { name: 'Ad Hominem', pattern: /you('re| are)\s+(stupid|idiot|dumb|wrong|ignorant)/i, desc: 'Attacking the person rather than the argument', icon: '🎯', severity: 'high', fix: 'Focus on the argument\'s logic, not the person.' },
@@ -17,51 +18,63 @@ const FALLACY_PATTERNS = [
 const EVIDENCE_KW = ['study', 'research', 'data', 'evidence', 'statistic', 'percent', 'report', 'survey', 'found that', 'according to', 'source', 'published'];
 const REASONING_KW = ['because', 'therefore', 'thus', 'hence', 'consequently', 'as a result', 'this means', 'which leads to'];
 
-async function analyzeArgument(text, format, topic, history) {
+// Fetch with timeout — never waits longer than FETCH_TIMEOUT
+function fetchWithTimeout(url, options, timeout = FETCH_TIMEOUT) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+  const timer = setTimeout(() => controller.abort(), timeout);
+  return fetch(url, { ...options, signal: controller.signal })
+    .then(res => { clearTimeout(timer); return res; })
+    .catch(err => { clearTimeout(timer); throw err; });
+}
+
+async function analyzeArgument(text, format) {
+  // Race: local analysis is instant, server might be faster with AI
+  const localResult = clientAnalysis(text);
   try {
-    const res = await fetch(`${API_BASE}/analyze`, { 
-      method: 'POST', 
-      headers: { 'Content-Type': 'application/json' }, 
-      body: JSON.stringify({ text, format, topic, history }),
-      signal: controller.signal
+    const res = await fetchWithTimeout(`${API_BASE}/analyze/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, format })
     });
-    clearTimeout(timeoutId);
-    if (res.ok) return await res.json();
+    if (res.ok) {
+      const data = await res.json();
+      return data;
+    }
   } catch (e) {
-    console.warn('AI Analysis failed or timed out, using fallback:', e.message);
-  } finally {
-    clearTimeout(timeoutId);
+    console.warn('Analyze API unavailable, using instant local analysis');
   }
-  return clientAnalysis(text);
+  return localResult;
 }
 
 async function getCounterArgument(text, format, history, topic) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const localResult = clientCounter(text);
   try {
-    const res = await fetch(`${API_BASE}/debate`, { 
-      method: 'POST', 
-      headers: { 'Content-Type': 'application/json' }, 
-      body: JSON.stringify({ text, format, history, topic }),
-      signal: controller.signal
+    const res = await fetchWithTimeout(`${API_BASE}/debate/debate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, format, history, topic })
     });
-    clearTimeout(timeoutId);
-    if (res.ok) return await res.json();
+    if (res.ok) {
+      const data = await res.json();
+      return data;
+    }
   } catch (e) {
-    console.warn('AI Counter failed or timed out:', e.message);
-  } finally {
-    clearTimeout(timeoutId);
+    console.warn('Counter API unavailable, using instant local analysis');
   }
-  return clientCounter(text);
+  return localResult;
 }
 
 async function analyzeSpeechAPI(transcript, duration) {
   try {
-    const res = await fetch(`${API_BASE}/speech`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transcript, duration }) });
+    const res = await fetchWithTimeout(`${API_BASE}/speech/speech`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transcript, duration })
+    });
     if (res.ok) return await res.json();
-  } catch (e) {}
+  } catch (e) {
+    console.warn('Speech API timed out or failed, using local:', e.message);
+  }
   return clientSpeechAnalysis(transcript, duration);
 }
 
@@ -102,10 +115,49 @@ function clientAnalysis(text) {
 }
 
 function clientCounter(text) {
-  const s = text.split(/[.!?]+/)[0]?.trim() || text.substring(0, 80);
+  const words = text.toLowerCase().split(/\s+/);
+  const isQuestion = text.includes('?');
+  const isShort = words.length < 8;
+  const isAgreement = /agree|you('re| are) right|you win|give up|concede/i.test(text);
+
+  if (isAgreement) {
+    return {
+      counter_argument: "I'm glad we could find common ground. It takes a strong debater to recognize a valid point. I accept your agreement!",
+      status: 'ai_win',
+      strength: 'N/A', approach: 'Concession'
+    };
+  }
+  
+  const intros = [
+    "That's an interesting point, but ",
+    "I see where you're coming from. However, ",
+    "You make a fair point, but I'd argue that ",
+    "I completely disagree. Here's why: ",
+    "While that sounds good in theory, in practice "
+  ];
+  const conclusions = [
+    "What do you think about the opposite side of that?",
+    "Don't you think the risks outweigh those benefits?",
+    "We also have to consider the long-term consequences.",
+    "Have you considered the exceptions to that rule?"
+  ];
+  
+  let response = intros[Math.floor(Math.random() * intros.length)];
+  
+  if (isQuestion) {
+    response = "That's a good question. My perspective is that we can't ignore the realities on the ground. ";
+  } else if (isShort) {
+    response += "that claim feels a bit oversimplified. ";
+  } else {
+    response += "if we look at the broader picture, there are significant drawbacks you haven't mentioned. ";
+  }
+  
+  response += conclusions[Math.floor(Math.random() * conclusions.length)];
+  
   return {
-    counter_argument: `I respectfully disagree with "${s}". While this position has surface-level appeal, it fails to account for critical factors. Multiple peer-reviewed studies have found contradictory results. This argument commits a common logical error by assuming correlation implies causation. A more nuanced view would acknowledge the complexity and consider alternative frameworks.`,
-    strength: 'Strong', approach: 'Evidence-based rebuttal with logical analysis'
+    counter_argument: response,
+    status: 'ongoing',
+    strength: 'Medium', approach: 'Conversational rebuttal'
   };
 }
 
@@ -121,4 +173,33 @@ function clientSpeechAnalysis(transcript, duration) {
   const fillerRate = ((totalFillers / wc) * 100).toFixed(1);
   const confidence = Math.max(20, Math.min(100, Math.round(80 - fillerRate * 5 + (wpm > 120 && wpm < 160 ? 15 : 0) - (wpm > 180 ? 10 : 0))));
   return { words_per_minute: wpm, words_per_second: +(wc / dur).toFixed(1), total_words: wc, filler_words: fillerCount, total_fillers: totalFillers, filler_rate: fillerRate + '%', confidence, pace: wpm < 100 ? 'Slow' : wpm < 140 ? 'Moderate' : wpm < 170 ? 'Good' : 'Fast', tone: 'Neutral', suggestions: [ totalFillers > 3 ? `Reduce filler words (found ${totalFillers}). Try pausing instead.` : 'Great job minimizing filler words!', wpm < 100 ? 'Speak slightly faster for engagement' : wpm > 170 ? 'Slow down for clarity' : 'Excellent speaking pace' ] };
+}
+
+async function evaluateDebate(topic, history) {
+  const localFallback = () => {
+    const userMsgs = history.filter(m => m.role === 'user');
+    const userWords = userMsgs.reduce((s, m) => s + m.content.split(/\s+/).length, 0);
+    const rounds = Math.floor(history.length / 2);
+    const score = Math.min(85, Math.max(30, 50 + Math.floor(userWords / 20) + rounds * 2));
+    return {
+      winner: score >= 60 ? 'user' : score < 40 ? 'ai' : 'draw',
+      score,
+      summary: `After ${rounds} rounds, ${score >= 60 ? 'you presented stronger arguments.' : score < 40 ? 'the AI maintained a stronger position.' : 'both sides made compelling points.'}`,
+      user_strengths: ['Sustained engagement', 'Multiple arguments presented'],
+      user_weaknesses: ['Could strengthen evidence with data'],
+      key_moments: userMsgs.slice(0, 3).map((m, i) => `Round ${i + 1}: ${m.content.substring(0, 80)}...`),
+      key_points_missed: ['Address counterpoints more directly']
+    };
+  };
+  try {
+    const res = await fetchWithTimeout(`${API_BASE}/report/evaluate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, history })
+    });
+    if (res.ok) return await res.json();
+  } catch (e) {
+    console.warn('Evaluate API unavailable, using local fallback');
+  }
+  return localFallback();
 }

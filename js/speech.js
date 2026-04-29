@@ -7,41 +7,19 @@ let finalTranscriptAccumulated = '';
 
 function initSpeech() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    console.error('Speech Recognition not supported in this browser.');
-    return false;
-  }
-  
-  if (recognition) return true;
-
+  if (!SR) return false;
   recognition = new SR();
   recognition.continuous = true;
   recognition.interimResults = true;
   recognition.lang = 'en-US';
-
-  recognition.onstart = () => {
-    console.log('Speech recognition started');
-    isRecording = true;
-  };
-
   recognition.onresult = handleSpeechResult;
-
   recognition.onerror = (e) => {
     console.warn('Speech recognition error:', e.error);
-    if (e.error === 'not-allowed') {
-      showToast('Microphone access denied. Please allow it in browser settings.', 'error');
-      stopRecording();
-    } else if (e.error !== 'no-speech' && e.error !== 'aborted') {
-      // showToast('Speech error: ' + e.error, 'error');
-      // don't stop for every minor error
-    }
+    if (e.error !== 'no-speech' && e.error !== 'aborted') stopRecording();
   };
-
   recognition.onend = () => {
-    console.log('Speech recognition ended');
     if (isRecording) {
-      console.log('Restarting recognition...');
-      try { recognition.start(); } catch(e) { console.error('Restart failed:', e); }
+      try { recognition.start(); } catch(e) {}
     }
   };
   return true;
@@ -49,93 +27,47 @@ function initSpeech() {
 
 function handleSpeechResult(event) {
   let interim = '';
-  let newFinal = '';
-
   for (let i = event.resultIndex; i < event.results.length; i++) {
     const transcript = event.results[i][0].transcript;
     if (event.results[i].isFinal) {
-      newFinal += transcript + ' ';
+      finalTranscriptAccumulated += transcript + ' ';
     } else {
       interim += transcript;
     }
   }
-
-  if (newFinal) {
-    finalTranscriptAccumulated += newFinal;
-  }
-
   const ta = document.getElementById('argument-input');
   const tt = document.getElementById('transcript-text');
-  
-  if (ta) {
-    // Show accumulated final results + current interim
-    ta.value = (finalTranscriptAccumulated + interim).trim();
-    // Scroll to bottom
-    ta.scrollTop = ta.scrollHeight;
-  }
-  
+  if (ta) ta.value = finalTranscriptAccumulated.trim();
   if (tt) tt.textContent = interim || '...listening';
 }
 
 function startRecording() {
-  if (!recognition && !initSpeech()) { 
-    showToast('Voice input is not supported in this browser. Please use Chrome.', 'error'); 
-    return; 
-  }
-  
-  finalTranscriptAccumulated = document.getElementById('argument-input').value;
-  if (finalTranscriptAccumulated && !finalTranscriptAccumulated.endsWith(' ')) {
-    finalTranscriptAccumulated += ' ';
-  }
-
+  if (!recognition && !initSpeech()) { showToast('Voice not supported. Use Chrome.', 'error'); return; }
   isRecording = true;
+  finalTranscriptAccumulated = document.getElementById('argument-input').value;
+  if (finalTranscriptAccumulated) finalTranscriptAccumulated += ' ';
   speechStartTime = Date.now();
-  
-  const btn = document.getElementById('voice-btn');
-  const status = document.getElementById('voice-status');
-  const timer = document.getElementById('voice-timer');
-  const live = document.getElementById('live-transcript');
-
-  if (btn) btn.classList.add('recording');
-  if (status) status.textContent = 'Listening...';
-  if (timer) {
-    timer.style.display = '';
-    timer.textContent = '0:00';
-  }
-  if (live) live.style.display = '';
-
+  document.getElementById('voice-btn').classList.add('recording');
+  document.getElementById('voice-status').textContent = 'Recording...';
+  document.getElementById('voice-timer').style.display = '';
+  document.getElementById('live-transcript').style.display = '';
   speechTimerInterval = setInterval(() => {
     const s = Math.floor((Date.now() - speechStartTime) / 1000);
-    if (timer) timer.textContent = Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+    document.getElementById('voice-timer').textContent = Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
   }, 1000);
-
-  try { 
-    recognition.start(); 
-  } catch(e) { 
-    console.warn('Recognition already started or failed to start:', e);
-    // If it's already started, it's fine
-  }
+  try { recognition.start(); } catch(e) {}
 }
 
 function stopRecording() {
   isRecording = false;
-  if (recognition) {
-    try { recognition.stop(); } catch(e) { console.error('Stop error:', e); }
-  }
-  
+  if (recognition) try { recognition.stop(); } catch(e) {}
   clearInterval(speechTimerInterval);
-  
-  const btn = document.getElementById('voice-btn');
-  const status = document.getElementById('voice-status');
-  const timer = document.getElementById('voice-timer');
-  const live = document.getElementById('live-transcript');
-
-  if (btn) btn.classList.remove('recording');
-  if (status) status.textContent = 'Click to speak';
-  if (timer) timer.style.display = 'none';
-  if (live) live.style.display = 'none';
-  
+  document.getElementById('voice-btn').classList.remove('recording');
+  document.getElementById('voice-status').textContent = 'Click to speak';
+  document.getElementById('voice-timer').style.display = 'none';
+  document.getElementById('live-transcript').style.display = 'none';
   const duration = speechStartTime ? Math.floor((Date.now() - speechStartTime) / 1000) : 0;
+  window.lastSpeechDuration = duration;
   return { duration };
 }
 

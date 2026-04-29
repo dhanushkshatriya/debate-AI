@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from db import supabase
+from db import db, auth as firebase_auth
 
 router = APIRouter()
 
@@ -16,36 +16,34 @@ class LoginRequest(BaseModel):
 @router.post("/auth/register")
 async def register(req: RegisterRequest):
     try:
-        # Check if user exists
-        existing = supabase.table("users").select("*").eq("email", req.email).execute()
-        if len(existing.data) > 0:
-            return {"success": False, "error": "Email already registered."}
+        # Create user in Firebase Auth
+        user = firebase_auth.create_user(
+            email=req.email,
+            password=req.password,
+            display_name=req.name
+        )
         
-        # Insert new user
+        # Insert new user profile in Firestore
         new_user = {
             "email": req.email,
-            "password": req.password, # Plaintext for hackathon demo
             "name": req.name,
             "xp": 0,
             "achievements": [],
             "total_debates": 0
         }
-        res = supabase.table("users").insert(new_user).execute()
+        db.collection("users").document(req.email).set(new_user)
         return {"success": True, "name": req.name}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 @router.post("/auth/login")
 async def login(req: LoginRequest):
+    # Note: With Firebase, login is typically handled client-side.
+    # This endpoint is mostly a placeholder if you need custom token generation.
     try:
-        res = supabase.table("users").select("*").eq("email", req.email).execute()
-        if len(res.data) == 0:
-            return {"success": False, "error": "User not found."}
-            
-        user = res.data[0]
-        if user.get("password") != req.password:
-            return {"success": False, "error": "Incorrect password."}
-            
-        return {"success": True, "name": user.get("name")}
+        user = firebase_auth.get_user_by_email(req.email)
+        # We cannot verify passwords server-side using Firebase Admin SDK easily.
+        # It's highly recommended to use the client SDK for login.
+        return {"success": True, "name": user.display_name}
     except Exception as e:
         return {"success": False, "error": str(e)}

@@ -5,6 +5,8 @@ let currentDebateId = null;
 let speechDuration = 0;
 let currentHistory = [];
 let debateStatus = 'ongoing'; // 'ongoing', 'ai_win', 'user_win'
+let debateRound = 0;
+let allAnalyses = []; // track per-round analysis for final scoring
 
 // Navigation
 function navigate(page, params) {
@@ -93,7 +95,6 @@ function renderDashboard() {
 
 // ========== DEBATE PAGE ==========
 function renderDebatePage() {
-  // Format buttons
   document.querySelectorAll('.format-btn').forEach(btn => {
     btn.onclick = () => {
       document.querySelectorAll('.format-btn').forEach(b => b.classList.remove('active'));
@@ -101,159 +102,337 @@ function renderDebatePage() {
       currentFormat = btn.dataset.format;
     };
   });
+  const topicInput = document.getElementById('debate-topic');
+  if (!topicInput.value) {
+    randomizeTopic();
+  }
   lucide.createIcons();
 }
 
 function randomizeTopic() {
-  const t = ['Should artificial intelligence be regulated by governments?', 'Is space exploration worth the investment?', 'Should a universal basic income be implemented globally?', 'Is remote work better than office work?', 'Should genetic engineering in humans be allowed?'];
-  document.getElementById('debate-topic').value = t[Math.floor(Math.random() * t.length)];
+  const topicInput = document.getElementById('debate-topic');
+  const pastDebates = getStore().debates || [];
+  const usedTopics = new Set(pastDebates.map(d => d.topic?.toLowerCase().trim()));
+  
+  // Find topics that haven't been used yet
+  let availableTopics = TOPICS.filter(t => !usedTopics.has(t.toLowerCase().trim()));
+  
+  // If all topics used, reset available topics
+  if (availableTopics.length === 0) {
+    availableTopics = TOPICS;
+  }
+  
+  topicInput.value = availableTopics[Math.floor(Math.random() * availableTopics.length)];
 }
 
-function clearArgument() {
+function resetDebate() {
   document.getElementById('argument-input').value = '';
-  document.getElementById('analysis-results').style.display = 'none';
+  document.getElementById('thread-messages').innerHTML = '';
+  document.getElementById('thread-placeholder').style.display = '';
   document.getElementById('analysis-placeholder').style.display = '';
+  const ls = document.getElementById('live-scores');
+  if (ls) ls.style.display = 'none';
+  document.getElementById('debate-status-bar').style.display = 'none';
+  document.getElementById('debate-final-report').style.display = 'none';
+  document.getElementById('debate-input-panel').style.display = '';
   currentHistory = [];
   debateStatus = 'ongoing';
+  debateRound = 0;
+  allAnalyses = [];
+  currentDebateId = null;
+  const btn = document.getElementById('analyze-btn');
+  btn.disabled = false;
+  btn.innerHTML = '<i data-lucide="send"></i> Submit Argument';
+  
+  const endBtn = document.getElementById('end-debate-btn');
+  if (endBtn) {
+    endBtn.disabled = false;
+    endBtn.innerHTML = '<i data-lucide="square"></i> End Debate';
+  }
+  const giveUpBtn = document.getElementById('give-up-btn');
+  if (giveUpBtn) {
+    giveUpBtn.disabled = false;
+    giveUpBtn.innerHTML = '<i data-lucide="flag"></i> Give Up';
+  }
+  
+  lucide.createIcons();
+}
+
+function addMessageToThread(role, content, score) {
+  document.getElementById('thread-placeholder').style.display = 'none';
+  const container = document.getElementById('thread-messages');
+  const isUser = role === 'user';
+  const round = isUser ? debateRound : '';
+  const scoreTag = score ? `<span class="msg-score" style="color:${score >= 70 ? '#30d158' : score >= 50 ? '#ff9f0a' : '#ff2d55'}">${score}/100</span>` : '';
+  const div = document.createElement('div');
+  div.className = `thread-msg ${isUser ? 'msg-user' : 'msg-ai'} animate-fade-in`;
+  div.innerHTML = `
+    <div class="msg-header">
+      <span class="msg-role">${isUser ? '🧑 You' : '🤖 AI'}${round ? ` · Round ${round}` : ''}</span>
+      ${scoreTag}
+    </div>
+    <div class="msg-content">${content}</div>`;
+  container.appendChild(div);
+  // Auto-scroll to bottom
+  const thread = document.getElementById('debate-thread');
+  thread.scrollTop = thread.scrollHeight;
+}
+
+let userTurnTimer = null;
+let userTurnCountdown = null;
+let timeLeft = 30;
+
+function startUserTimer() {
+  clearTimeout(userTurnTimer);
+  clearInterval(userTurnCountdown);
+  if (debateStatus !== 'ongoing') return;
+  
+  timeLeft = 30;
+  const statusEl = document.getElementById('debate-status-text');
+  statusEl.textContent = `Your turn — respond to the AI (${timeLeft}s left)`;
+  
+  userTurnCountdown = setInterval(() => {
+    timeLeft--;
+    if (timeLeft > 0) {
+      statusEl.textContent = `Your turn — respond to the AI (${timeLeft}s left)`;
+    } else {
+      clearInterval(userTurnCountdown);
+    }
+  }, 1000);
+  
+  userTurnTimer = setTimeout(() => {
+    handleUserTimeout();
+  }, 30000);
+}
+
+function resetUserTimer() {
+  if (debateStatus === 'ongoing' && userTurnTimer) {
+    startUserTimer();
+  }
+}
+
+async function handleUserTimeout() {
+    debateStatus = 'ai_win';
+    addMessageToThread('system_msg', '⏳ You took too long to respond! AI wins by default.');
+    document.getElementById('debate-status-text').textContent = 'Time out — AI wins';
+    document.getElementById('debate-input-panel').style.display = 'none';
+    await showFinalReport('ai');
 }
 
 async function submitArgument() {
   const text = document.getElementById('argument-input').value.trim();
   const topic = document.getElementById('debate-topic').value;
-  if (!text) { showToast('Please enter an argument first', 'error'); return; }
-  if (text.length < 10) { showToast('Argument too short. Write at least a sentence.', 'error'); return; }
+  if (!text || text.length < 2) { showToast('Please enter an argument first', 'error'); return; }
+  if (debateStatus !== 'ongoing') { showToast('This debate has concluded. Start a new one!', 'info'); return; }
+
+  debateRound++;
+  clearTimeout(userTurnTimer);
+  clearInterval(userTurnCountdown);
   const btn = document.getElementById('analyze-btn');
   btn.disabled = true;
-  btn.innerHTML = '<span class="loading-spinner"></span> Thinking...';
+  let elapsed = 0;
+  const timerInterval = setInterval(() => { elapsed++; btn.innerHTML = `<span class="loading-spinner"></span> Thinking... ${elapsed}s`; }, 1000);
+  btn.innerHTML = '<span class="loading-spinner"></span> Thinking... 0s';
 
-  // Add user argument to history
+  // Show status bar
+  document.getElementById('debate-status-bar').style.display = '';
+  document.getElementById('round-badge').textContent = `Round ${debateRound}`;
+  document.getElementById('debate-status-text').textContent = 'AI is analyzing...';
+
+  // Add user message to thread immediately
+  addMessageToThread('user', text);
+  document.getElementById('argument-input').value = '';
+
   currentHistory.push({ role: 'user', content: text });
 
-  // Stop recording if active and start speech analysis
-  let speechPromise = Promise.resolve(null);
   let speechData = null;
-  
-  if (typeof isRecording !== 'undefined' && isRecording) {
-    const r = stopRecording();
-    if (r.duration > 2) {
-      speechPromise = analyzeSpeechAPI(text, r.duration);
-    }
-  }
-
-  // Unified analysis and counter-argument generation
-  const analysisPromise = analyzeArgument(text, currentFormat, topic, currentHistory);
+  if (typeof isRecording !== 'undefined' && isRecording) { const r = stopRecording(); speechDuration = r.duration; }
+  else if (window.lastSpeechDuration) { speechDuration = window.lastSpeechDuration; window.lastSpeechDuration = 0; }
 
   try {
-    const [analysis, speechDataResult] = await Promise.all([
-      analysisPromise,
-      speechPromise
+    const HARD_TIMEOUT = 30000;
+    const [analysis, counterRes] = await Promise.race([
+      Promise.all([
+        analyzeArgument(text, currentFormat),
+        getCounterArgument(text, currentFormat, currentHistory, topic)
+      ]),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('HARD_TIMEOUT')), HARD_TIMEOUT))
     ]);
-    
-    speechData = speechDataResult;
-    
-    if (analysis) {
-      const counterRes = {
-        counter_argument: analysis.counter_argument,
-        reasoning: analysis.counter_reasoning,
-        status: analysis.status || 'ongoing'
-      };
-      
-      currentHistory.push({ role: 'ai', content: counterRes.counter_argument });
-      debateStatus = counterRes.status || 'ongoing';
-      
-      const debate = await addDebate({ 
-        argument: text, 
-        topic, 
-        format: currentFormat, 
-        analysis, 
-        counter: counterRes.counter_argument, 
-        history: currentHistory,
-        status: debateStatus,
-        speechData 
-      });
-      currentDebateId = debate.id;
-      processDebateResult(analysis, speechData);
-      renderAnalysisResults(analysis, counterRes, speechData);
-      
-      if (debateStatus !== 'ongoing') {
-        const win = debateStatus === 'user_win';
-        showToast(win ? "CONGRATULATIONS! You won the debate!" : "The AI has won this debate.", win ? "success" : "info");
-      }
-    } else {
-      showToast("Could not analyze argument. Please try again.", "error");
+
+    allAnalyses.push(analysis);
+    const counterText = counterRes?.counter_argument || analysis.counter_argument;
+    currentHistory.push({ role: 'ai', content: counterText });
+    debateStatus = counterRes?.status || 'ongoing';
+
+    addMessageToThread('ai', counterText);
+    addMessageToThread('user_score', '', analysis.score); // hidden, just for score display
+    updateLiveScores(analysis);
+    processDebateResult(analysis, speechData);
+    addDebate({ argument: text, topic, format: currentFormat, analysis, counter: counterText, history: currentHistory, status: debateStatus, speechData });
+
+    if (debateStatus !== 'ongoing') {
+      let forced = null;
+      if (debateStatus === 'user_win') forced = 'user';
+      if (debateStatus === 'ai_win') forced = 'ai';
+      endDebate(forced);
+      return;
     }
+    startUserTimer();
   } catch (e) {
-    console.error("Submit error:", e);
-    showToast("Error during analysis: " + e.message, "error");
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i data-lucide="brain"></i> Continue Debate';
-    lucide.createIcons();
-    showToast(`Argument analyzed!`, 'success');
+    console.error('Analysis error:', e.message);
+    if (e.message === 'HARD_TIMEOUT') {
+      debateStatus = 'user_win';
+      addMessageToThread('system_msg', '🤖 AI took too long to respond (30s)! You win by default.');
+      document.getElementById('debate-status-text').textContent = 'AI Time out — You win';
+      document.getElementById('debate-input-panel').style.display = 'none';
+      await showFinalReport('user');
+    } else {
+      const la = clientAnalysis(text);
+      const lc = clientCounter(text);
+      allAnalyses.push(la);
+      currentHistory.push({ role: 'ai', content: lc.counter_argument });
+      addMessageToThread('ai', lc.counter_argument);
+      updateLiveScores(la);
+      processDebateResult(la, null);
+      addDebate({ argument: text, topic, format: currentFormat, analysis: la, counter: lc.counter_argument, history: currentHistory, status: lc.status || 'ongoing', speechData: null });
+      
+      if (lc.status && lc.status !== 'ongoing') {
+        let forced = null;
+        if (lc.status === 'user_win') forced = 'user';
+        if (lc.status === 'ai_win') forced = 'ai';
+        endDebate(forced);
+        return;
+      }
+      startUserTimer();
+    }
   }
+
+  clearInterval(timerInterval);
+  btn.disabled = false;
+  btn.innerHTML = '<i data-lucide="send"></i> Reply';
+  lucide.createIcons();
 }
 
-function renderAnalysisResults(analysis, counter, speechData) {
+function updateLiveScores(analysis) {
   document.getElementById('analysis-placeholder').style.display = 'none';
-  document.getElementById('analysis-results').style.display = '';
+  const ls = document.getElementById('live-scores');
+  if (ls) ls.style.display = '';
 
-  // Score gauges
   document.getElementById('score-gauges').innerHTML = [
     gaugeHTML(analysis.score, 'Overall'),
     gaugeHTML(analysis.logic, 'Logic', '#8b5cf6'),
     gaugeHTML(analysis.clarity, 'Clarity', '#06b6d4'),
     gaugeHTML(analysis.persuasion, 'Persuasion', '#30d158'),
-    gaugeHTML(analysis.evidence_score || 50, 'Evidence', '#ff9f0a'),
   ].join('');
 
-  // Argument breakdown
-  const t = typeof TRANSLATIONS !== 'undefined' ? TRANSLATIONS[currentLang] : {};
-  document.getElementById('argument-breakdown').innerHTML = `<h3 style="display:flex;align-items:center;gap:8px;margin-bottom:16px"><span style="color:#06b6d4">📋</span> ${t.breakdown || 'Argument Breakdown'}</h3>
-    <div class="breakdown-section"><div class="breakdown-label">${t.claim || 'Claim'}</div><div class="breakdown-text">${analysis.claim}</div></div>
-    <div class="breakdown-section"><div class="breakdown-label">${t.evidence || 'Evidence'}</div><div class="breakdown-text" style="border-color:${analysis.evidence === 'No specific evidence cited' ? 'var(--neon-pink)' : 'var(--neon-green)'}">${analysis.evidence}</div></div>
-    <div class="breakdown-section"><div class="breakdown-label">${t.reasoning || 'Reasoning'}</div><div class="breakdown-text" style="border-color:var(--accent)">${analysis.reasoning}</div></div>
-    <div class="breakdown-section"><div class="breakdown-label">${t.tone || 'Tone'}</div><div class="breakdown-text" style="border-color:var(--neon-orange)">${analysis.tone}</div></div>`;
-
-  // Fallacy alerts
   const fa = document.getElementById('fallacy-alerts');
-  if (analysis.fallacies.length > 0) {
-    fa.innerHTML = analysis.fallacies.map((f, i) => {
-      const sev = f.severity || 'medium';
-      const col = sev === 'high' ? '#ff2d55' : sev === 'medium' ? '#ff9f0a' : '#30d158';
-      return `<div class="glass-card fallacy-alert" style="border-left-color:${col};animation-delay:${i*0.15}s;margin-bottom:12px"><div class="fallacy-alert-glow" style="background:linear-gradient(90deg,${col}10,transparent)"></div><div class="fallacy-alert-content"><div class="fallacy-alert-emoji">${f.icon || '⚠️'}</div><div><div class="fallacy-alert-title"><h4>${f.name}</h4><span class="severity-badge" style="background:${col}20;color:${col}">${sev}</span></div><p class="fallacy-alert-desc">${f.description}</p><div class="fallacy-alert-fix">💡 ${f.fix || 'Review your argument structure.'}</div></div></div></div>`;
-    }).join('');
+  if (analysis.fallacies && analysis.fallacies.length > 0) {
+    fa.innerHTML = `<h3><span style="color:#ff2d55">⚠️</span> Fallacies (${analysis.fallacies.length})</h3>` +
+      analysis.fallacies.map(f => {
+        const col = f.severity === 'high' ? '#ff2d55' : f.severity === 'medium' ? '#ff9f0a' : '#30d158';
+        return `<div style="display:flex;gap:8px;padding:8px;margin-top:8px;background:${col}10;border-radius:8px;border-left:3px solid ${col}"><span>${f.icon||'⚠️'}</span><div><strong style="font-size:.85rem">${f.name}</strong><p style="font-size:.8rem;color:var(--text-sec);margin:2px 0">${f.description}</p></div></div>`;
+      }).join('');
   } else {
-    fa.innerHTML = `<div class="glass-card" style="border-left:3px solid var(--neon-green);padding:16px;display:flex;align-items:center;gap:12px;margin-bottom:12px"><span style="font-size:1.5rem">✨</span><div><h4 style="font-size:.9rem;font-weight:700;color:var(--neon-green)">No Fallacies Detected</h4><p style="font-size:.8rem;color:var(--text-sec)">Great job! Your argument is logically sound.</p></div></div>`;
+    fa.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><span>✨</span><span style="color:var(--neon-green);font-size:.9rem;font-weight:600">No Fallacies Detected</span></div>`;
   }
 
-  // AI Counter
-  const statusBadge = debateStatus === 'ongoing' ? '' : `<div class="status-badge ${debateStatus}">${debateStatus.replace('_', ' ').toUpperCase()}</div>`;
-  document.getElementById('ai-counter').innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
-      <h3><span style="color:var(--accent)">⚔️</span> ${t.ai_response || 'AI Response'}</h3>
-      ${statusBadge}
-    </div>
-    <div class="counter-text">${counter.counter_argument || analysis.counter_argument}</div>
-    ${counter.reasoning ? `<div class="ai-reasoning"><strong>AI Reasoning:</strong> ${counter.reasoning}</div>` : ''}
-  `;
-
-  // Suggestions
-  document.getElementById('suggestions-panel').innerHTML = `<h3><span style="color:var(--neon-green)">💡</span> Improvement Suggestions</h3>${analysis.suggestions.map(s => `<div class="suggestion-item"><div class="suggestion-dot"></div><span>${s}</span></div>`).join('')}`;
-
-  // Speech metrics
-  const sp = document.getElementById('speech-metrics-panel');
-  if (speechData) {
-    sp.style.display = '';
-    const mc = (v, t) => v > t ? '#30d158' : v > t * 0.5 ? '#ff9f0a' : '#ff2d55';
-    sp.innerHTML = `<div class="glass-card"><h3 style="display:flex;align-items:center;gap:8px;margin-bottom:16px"><span style="color:var(--primary)">🎤</span> Speech Analysis</h3><div class="speech-metrics-grid">
-      <div class="glass-card speech-metric"><div style="color:${mc(speechData.words_per_minute, 140)}">🏃</div><div class="speech-metric-value" style="color:${mc(speechData.words_per_minute, 140)}">${speechData.words_per_minute}</div><div class="speech-metric-label">Words/Min</div><div class="speech-metric-sub" style="color:${mc(speechData.words_per_minute, 140)}">${speechData.pace}</div></div>
-      <div class="glass-card speech-metric"><div style="color:var(--primary)">📝</div><div class="speech-metric-value" style="color:var(--primary)">${speechData.total_words}</div><div class="speech-metric-label">Total Words</div><div class="speech-metric-sub">${speechData.words_per_second}/sec</div></div>
-      <div class="glass-card speech-metric"><div style="color:${speechData.total_fillers > 5 ? '#ff2d55' : '#30d158'}">⚠️</div><div class="speech-metric-value" style="color:${speechData.total_fillers > 5 ? '#ff2d55' : '#30d158'}">${speechData.total_fillers}</div><div class="speech-metric-label">Filler Words</div><div class="speech-metric-sub">${speechData.filler_rate}</div></div>
-      <div class="glass-card speech-metric"><div style="color:${mc(speechData.confidence, 70)}">💪</div><div class="speech-metric-value" style="color:${mc(speechData.confidence, 70)}">${speechData.confidence}%</div><div class="speech-metric-label">Confidence</div></div>
-      ${Object.keys(speechData.filler_words).length ? `<div class="filler-breakdown glass-card"><h4>Filler Words Detected</h4><div class="filler-tags">${Object.entries(speechData.filler_words).map(([w,c]) => `<span class="filler-tag">"${w}" × ${c}</span>`).join('')}</div></div>` : ''}
-    </div></div>`;
-  } else sp.style.display = 'none';
+  document.getElementById('suggestions-panel').innerHTML = `<h3><span style="color:var(--neon-green)">💡</span> Tips</h3>` +
+    (analysis.suggestions || []).slice(0, 3).map(s => `<div class="suggestion-item"><div class="suggestion-dot"></div><span style="font-size:.85rem">${s}</span></div>`).join('');
+  lucide.createIcons();
 }
+
+async function giveUpDebate() {
+  debateStatus = 'ai_win';
+  addMessageToThread('system_msg', '🏳️ You conceded the debate.');
+  document.getElementById('debate-status-text').textContent = 'You gave up — AI wins';
+  document.getElementById('debate-input-panel').style.display = 'none';
+  await showFinalReport('ai');
+}
+
+async function endDebate(forceWinner) {
+  if (currentHistory.length < 2) { showToast('Debate at least 1 round first', 'error'); return; }
+  debateStatus = 'ended';
+  document.getElementById('debate-input-panel').style.display = 'none';
+  document.getElementById('debate-status-text').textContent = 'Evaluating debate...';
+  document.getElementById('give-up-btn').disabled = true;
+  document.getElementById('end-debate-btn').disabled = true;
+  await showFinalReport(forceWinner);
+}
+
+async function showFinalReport(forceWinner) {
+  clearTimeout(userTurnTimer);
+  clearInterval(userTurnCountdown);
+  
+  // Disable both buttons immediately to prevent double-judging
+  const endBtn = document.getElementById('end-debate-btn');
+  const giveUpBtn = document.getElementById('give-up-btn');
+  if (endBtn) {
+    endBtn.disabled = true;
+    endBtn.innerHTML = '<span class="loading-spinner"></span> Judging...';
+  }
+  if (giveUpBtn) giveUpBtn.disabled = true;
+  
+  const topic = document.getElementById('debate-topic').value;
+  let result;
+  try {
+    result = await evaluateDebate(topic, currentHistory);
+  } catch (e) {
+    result = { winner: 'draw', score: 50, summary: 'Could not evaluate. Both sides debated well.' };
+  }
+  if (forceWinner) result.winner = forceWinner;
+
+  const avgScore = allAnalyses.length ? Math.round(allAnalyses.reduce((s, a) => s + (a.score || 0), 0) / allAnalyses.length) : 50;
+  const avgLogic = allAnalyses.length ? Math.round(allAnalyses.reduce((s, a) => s + (a.logic || 0), 0) / allAnalyses.length) : 50;
+  const avgClarity = allAnalyses.length ? Math.round(allAnalyses.reduce((s, a) => s + (a.clarity || 0), 0) / allAnalyses.length) : 50;
+  const avgPersuasion = allAnalyses.length ? Math.round(allAnalyses.reduce((s, a) => s + (a.persuasion || 0), 0) / allAnalyses.length) : 50;
+
+  const isWin = result.winner === 'user';
+  const isDraw = result.winner === 'draw' || result.winner === 'none';
+  const winColor = isWin ? '#30d158' : isDraw ? '#ff9f0a' : '#ff2d55';
+  const winEmoji = isWin ? '🏆' : isDraw ? '🤝' : '🤖';
+  const winText = isWin ? 'YOU WIN!' : isDraw ? 'DRAW' : 'AI WINS';
+
+  // Hide the status bar so the user doesn't see the stuck 'Judging' button
+  document.getElementById('debate-status-bar').style.display = 'none';
+  
+  const report = document.getElementById('debate-final-report');
+  report.style.display = '';
+  document.getElementById('final-report-body').innerHTML = `
+    <div class="glass-card" style="text-align:center;padding:40px 20px;margin-bottom:24px;background:radial-gradient(ellipse at top, ${winColor}20, transparent 70%), rgba(10,10,15,0.6);border-top:4px solid ${winColor}">
+      <div style="font-size:5rem;margin-bottom:12px;filter:drop-shadow(0 0 20px ${winColor}80)">${winEmoji}</div>
+      <h2 style="font-size:2.5rem;color:${winColor};margin:0;letter-spacing:-0.04em;text-transform:uppercase">${winText}</h2>
+      
+      <div style="display:flex;gap:12px;justify-content:center;margin-top:24px">
+        <div style="background:rgba(6,182,212,.1);border:1px solid rgba(6,182,212,.3);border-radius:100px;padding:8px 20px;font-size:.9rem;color:#06b6d4;font-weight:600">📊 ${debateRound} Rounds</div>
+        <div style="background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.3);border-radius:100px;padding:8px 20px;font-size:.9rem;color:#a78bfa;font-weight:600">💬 ${currentHistory.length} Messages</div>
+      </div>
+    </div>
+    
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));gap:24px;margin-bottom:24px">
+      <div class="glass-card report-section" style="margin:0;grid-column:1/-1">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px"><i data-lucide="graduation-cap" style="color:#8b5cf6;width:32px;height:32px"></i><h3 style="margin:0;font-size:1.4rem">Mentor's Final Verdict</h3></div>
+        <p style="color:var(--text-sec);line-height:1.7;font-size:1.1rem;margin:0">${result.mentor_advice || result.summary || 'The debate has concluded.'}</p>
+      </div>
+
+      <div class="glass-card report-section" style="margin:0;grid-column:1/-1;display:flex;justify-content:space-around;flex-wrap:wrap">
+        ${gaugeHTML(avgScore, 'Avg Score')}${gaugeHTML(avgLogic, 'Logic', '#8b5cf6')}${gaugeHTML(avgClarity, 'Clarity', '#06b6d4')}${gaugeHTML(avgPersuasion, 'Persuasion', '#30d158')}
+      </div>
+
+      <div class="glass-card report-section" style="margin:0"><h3 style="color:#30d158;display:flex;align-items:center;gap:8px"><i data-lucide="trending-up"></i> Key Strengths</h3><ul style="color:var(--text-sec);padding-left:20px;margin-top:12px;line-height:1.6">${((result.strengths && result.strengths.length) ? result.strengths : (result.user_strengths && result.user_strengths.length) ? result.user_strengths : ['Participated actively', 'Presented logical arguments']).map(s => `<li style="margin-bottom:8px">${s}</li>`).join('')}</ul></div>
+      <div class="glass-card report-section" style="margin:0"><h3 style="color:#ff9f0a;display:flex;align-items:center;gap:8px"><i data-lucide="target"></i> Areas to Improve</h3><ul style="color:var(--text-sec);padding-left:20px;margin-top:12px;line-height:1.6">${((result.weaknesses && result.weaknesses.length) ? result.weaknesses : (result.user_weaknesses && result.user_weaknesses.length) ? result.user_weaknesses : (result.key_points_missed && result.key_points_missed.length) ? result.key_points_missed : ['Structure arguments more clearly', 'Add more empirical evidence']).map(s => `<li style="margin-bottom:8px">${s}</li>`).join('')}</ul></div>
+    </div>
+    
+    <div style="display:flex;justify-content:center;gap:16px;margin-top:32px;flex-wrap:wrap">
+      <button class="btn-primary" onclick="resetDebate()"><i data-lucide="plus"></i> New Debate</button>
+      <button class="btn-secondary" onclick="navigate('dashboard')"><i data-lucide="layout-dashboard"></i> Dashboard</button>
+      <button class="btn-secondary" onclick="downloadReport()"><i data-lucide="download"></i> Download Report</button>
+    </div>`;
+
+  document.getElementById('debate-status-text').textContent = `Debate concluded — ${winText}`;
+  report.scrollIntoView({ behavior: 'smooth' });
+  lucide.createIcons();
+}
+
 
 // ========== REPORT PAGE ==========
 function renderReport(id) {
@@ -261,21 +440,134 @@ function renderReport(id) {
   const debate = did ? getDebateById(did) : getStore().debates[0];
   const body = document.getElementById('report-body');
   if (!debate) { body.innerHTML = '<div style="text-align:center;padding:80px;color:var(--text-muted)"><p style="font-size:1.2rem;margin-bottom:16px">No debate report found</p><button class="btn-primary" onclick="navigate(\'debate\')"><i data-lucide="swords"></i> Start a Debate</button></div>'; lucide.createIcons(); return; }
-  const a = debate.analysis, date = new Date(debate.timestamp).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  body.innerHTML = `<div class="report-meta"><span>📅 ${date}</span><span>💬 ${debate.format || 'casual'}</span><span>📝 ${debate.argument?.split(/\s+/).length || 0} words</span></div>
-    <div class="glass-card report-section"><div class="report-scores">${gaugeHTML(a.score, 'Overall')}${gaugeHTML(a.logic, 'Logic', '#8b5cf6')}${gaugeHTML(a.clarity, 'Clarity', '#06b6d4')}${gaugeHTML(a.persuasion, 'Persuasion', '#30d158')}</div></div>
-    <div class="glass-card report-section"><h3>📌 Topic</h3><p style="color:var(--text-sec);line-height:1.6">${debate.topic || 'General debate'}</p></div>
-    <div class="glass-card report-section"><h3>📝 Your Argument</h3><p style="color:var(--text-sec);line-height:1.6">${debate.argument}</p></div>
-    <div class="glass-card report-section"><h3>📋 Breakdown</h3>
-      <div class="breakdown-section"><div class="breakdown-label">Claim</div><div class="breakdown-text">${a.claim}</div></div>
-      <div class="breakdown-section"><div class="breakdown-label">Evidence</div><div class="breakdown-text">${a.evidence}</div></div>
-      <div class="breakdown-section"><div class="breakdown-label">Reasoning</div><div class="breakdown-text">${a.reasoning}</div></div></div>
-    ${a.fallacies.length ? `<div class="glass-card report-section"><h3>⚠️ Fallacies Found (${a.fallacies.length})</h3>${a.fallacies.map(f => `<div style="display:flex;gap:10px;padding:10px;background:rgba(255,45,85,.05);border-radius:10px;margin-bottom:8px"><span style="font-size:1.2rem">${f.icon||'⚠️'}</span><div><strong>${f.name}</strong><p style="font-size:.85rem;color:var(--text-sec)">${f.description}</p></div></div>`).join('')}</div>` : ''}
-    <div class="glass-card report-section"><h3>⚔️ AI Counterargument</h3><div class="counter-text">${debate.counter || a.counter_argument}</div></div>
-    <div class="glass-card report-section"><h3>💡 Suggestions</h3>${a.suggestions.map(s => `<div class="suggestion-item"><div class="suggestion-dot"></div><span>${s}</span></div>`).join('')}</div>
-    <div style="text-align:center;margin-top:24px"><button class="btn-primary" onclick="navigate('debate')"><i data-lucide="swords"></i> New Debate</button></div>`;
+  const a = debate.analysis || {}, date = new Date(debate.timestamp).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  
+  let html = `<div class="report-meta" style="justify-content:center;margin-bottom:32px;background:rgba(255,255,255,0.03);padding:12px;border-radius:100px;border:1px solid rgba(255,255,255,0.05)"><span>📅 ${date}</span><span>💬 ${debate.format || 'casual'}</span><span>📝 ${debate.argument?.split(/\s+/).length || 0} words</span></div>
+    
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));gap:24px;margin-bottom:24px">
+      <div class="glass-card report-section" style="margin:0;border-top:4px solid #8b5cf6;grid-column:1/-1">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px"><i data-lucide="graduation-cap" style="color:#8b5cf6;width:32px;height:32px"></i><h3 style="margin:0;font-size:1.4rem">Mentor's Feedback</h3></div>
+        <p style="color:var(--text-sec);line-height:1.7;font-size:1.1rem">${a.mentor_advice || a.summary || 'Good debate!'}</p>
+      </div>
+      
+      <div class="glass-card report-section" style="margin:0;grid-column:1/-1;display:flex;justify-content:space-around;flex-wrap:wrap">
+        ${gaugeHTML(a.score||0, 'Overall')}${gaugeHTML(a.logic||0, 'Logic', '#8b5cf6')}${gaugeHTML(a.clarity||0, 'Clarity', '#06b6d4')}${gaugeHTML(a.persuasion||0, 'Persuasion', '#30d158')}
+      </div>
+
+      <div class="glass-card report-section" style="margin:0"><h3 style="color:#30d158;display:flex;align-items:center;gap:8px"><i data-lucide="trending-up"></i> Strengths</h3><ul style="color:var(--text-sec);padding-left:20px;margin-top:12px;line-height:1.6">${(a.strengths||[]).map(s=>`<li style="margin-bottom:8px">${s}</li>`).join('')}</ul></div>
+      <div class="glass-card report-section" style="margin:0"><h3 style="color:#ff9f0a;display:flex;align-items:center;gap:8px"><i data-lucide="target"></i> Areas to Improve</h3><ul style="color:var(--text-sec);padding-left:20px;margin-top:12px;line-height:1.6">${(a.weaknesses||[]).map(s=>`<li style="margin-bottom:8px">${s}</li>`).join('')}</ul></div>
+    </div>
+
+    <div class="glass-card report-section" style="margin-bottom:24px"><h3>📌 Topic</h3><p style="color:var(--text);font-size:1.1rem;line-height:1.6">${debate.topic || 'General debate'}</p></div>
+    
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px">
+      <div class="glass-card report-section" style="margin:0;border-left:3px solid #06b6d4"><h3 style="color:#06b6d4">📝 Your Argument</h3><p style="color:var(--text-sec);line-height:1.7">${debate.argument}</p></div>
+      <div class="glass-card report-section" style="margin:0;border-left:3px solid #ff2d55"><h3 style="color:#ff2d55">⚔️ AI Counterargument</h3><p style="color:var(--text-sec);line-height:1.7">${debate.counter || a.counter_argument || 'None provided'}</p></div>
+    </div>
+    
+    <div class="glass-card report-section" style="margin-bottom:24px"><h3>📋 Argument Breakdown</h3>
+      <div style="display:grid;gap:12px;margin-top:16px">
+        <div style="background:rgba(255,255,255,0.03);padding:16px;border-radius:12px;border:1px solid rgba(255,255,255,0.05)"><div style="color:#a78bfa;font-weight:600;margin-bottom:8px">Claim</div><div style="color:var(--text-sec)">${a.claim||'N/A'}</div></div>
+        <div style="background:rgba(255,255,255,0.03);padding:16px;border-radius:12px;border:1px solid rgba(255,255,255,0.05)"><div style="color:#30d158;font-weight:600;margin-bottom:8px">Evidence</div><div style="color:var(--text-sec)">${a.evidence||'N/A'}</div></div>
+        <div style="background:rgba(255,255,255,0.03);padding:16px;border-radius:12px;border:1px solid rgba(255,255,255,0.05)"><div style="color:#06b6d4;font-weight:600;margin-bottom:8px">Reasoning</div><div style="color:var(--text-sec)">${a.reasoning||'N/A'}</div></div>
+      </div>
+    </div>`;
+
+  if (a.fallacies && a.fallacies.length) {
+    html += `<div class="glass-card report-section" style="margin-bottom:24px"><h3><span style="color:#ff2d55">⚠️</span> Fallacies Detected (${a.fallacies.length})</h3>${a.fallacies.map(f => `<div style="display:flex;gap:12px;padding:16px;background:rgba(255,45,85,.05);border-radius:16px;border-left:4px solid #ff2d55;margin-top:12px"><span style="font-size:1.5rem">${f.icon||'⚠️'}</span><div><strong style="color:white;font-size:1.1rem">${f.name}</strong><p style="font-size:.95rem;color:var(--text-sec);margin-top:6px">${f.description}</p></div></div>`).join('')}</div>`;
+  }
+  
+  html += `<div class="glass-card report-section" style="margin-bottom:32px"><h3>💡 Pro Tips</h3><div style="margin-top:16px">${(a.suggestions||[]).map(s => `<div class="suggestion-item" style="background:rgba(48,209,88,0.05);border:1px solid rgba(48,209,88,0.1);padding:12px 16px;border-radius:12px;margin-bottom:8px;display:flex;align-items:center;gap:12px"><div class="suggestion-dot" style="background:#30d158"></div><span style="color:var(--text-sec)">${s}</span></div>`).join('')}</div></div>
+    <div style="display:flex;justify-content:center;gap:16px;margin-top:40px;flex-wrap:wrap">
+      <button class="btn-primary" onclick="navigate('debate')"><i data-lucide="swords"></i> New Debate</button>
+      <button class="btn-secondary" onclick="downloadReport(${did})"><i data-lucide="download"></i> Download Report</button>
+    </div>`;
+    
+  body.innerHTML = html;
   lucide.createIcons();
 }
+
+window.downloadReport = async function(id) {
+  let sourceElement;
+  if (document.getElementById('page-report').classList.contains('active')) {
+    sourceElement = document.getElementById('report-body');
+  } else {
+    sourceElement = document.getElementById('final-report-body');
+  }
+  
+  if (!sourceElement || !sourceElement.innerHTML.trim()) {
+    showToast('Report content is empty or not found.', 'error');
+    return;
+  }
+
+  showToast('Preparing PDF Document...', 'info');
+
+  // 1. Create a dedicated print window
+  const printWindow = window.open('', '_blank', 'width=900,height=1000');
+  
+  // 2. Generate specialized Print HTML
+  const printHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Debate AI - Analysis Report</title>
+      <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+      <style>
+        :root { --primary: #06b6d4; --bg: #050508; --card: #0f172a; --text: #f8fafc; }
+        * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        body { 
+          background: var(--bg) !important; 
+          color: var(--text) !important; 
+          font-family: 'Outfit', sans-serif; 
+          margin: 0; padding: 40px; 
+        }
+        .container { max-width: 800px; margin: 0 auto; }
+        .header { border-bottom: 3px solid var(--primary); padding-bottom: 20px; margin-bottom: 40px; }
+        .header h1 { margin: 0; font-size: 32px; color: var(--primary); }
+        .glass-card, .report-section { 
+          background: var(--card) !important; 
+          border: 1px solid #1e293b !important; 
+          padding: 30px !important; 
+          border-radius: 16px !important; 
+          margin-bottom: 24px !important;
+          break-inside: avoid;
+        }
+        .gauge-circle { width: 90px; height: 90px; position: relative; margin: 0 auto 10px; }
+        svg { transform: rotate(-90deg); }
+        .gauge-bg { fill: none; stroke: #1e293b; stroke-width: 8; }
+        .gauge-fill { fill: none; stroke-width: 8; stroke-linecap: round; }
+        .gauge-value { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-weight: 800; font-size: 20px; }
+        .gauge-label { text-align: center; font-size: 14px; opacity: 0.8; }
+        .fallacy-tag { background: rgba(255,45,85,0.1); color: #ff2d55; padding: 4px 10px; border-radius: 6px; font-size: 12px; margin-right: 5px; }
+        button, .nav-links, .pulse-ring { display: none !important; }
+        h1, h2, h3 { color: var(--primary); margin-top: 0; }
+        p { line-height: 1.6; opacity: 0.9; }
+        .suggestion-item { background: rgba(48,209,88,0.05); padding: 12px; border-radius: 8px; margin-bottom: 8px; border-left: 4px solid #30d158; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>DEBATE ANALYSIS REPORT</h1>
+          <p>Analytical Audit • Neural Void AI Engine</p>
+        </div>
+        ${sourceElement.innerHTML}
+      </div>
+      <script>
+        window.onload = () => {
+          setTimeout(() => {
+            window.print();
+            // Optional: window.close();
+          }, 1000);
+        };
+      <\/script>
+    </body>
+    </html>
+  `;
+
+  printWindow.document.write(printHtml);
+  printWindow.document.close();
+};
 
 // ========== PROFILE PAGE ==========
 function renderProfile() {
@@ -338,28 +630,30 @@ window.togglePasswordVisibility = function() {
 };
 
 // Init
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   initParticles();
   lucide.createIcons();
   randomizeTopic();
-
-  // Firebase auth state listener handles routing
-  auth.onAuthStateChanged(async (user) => {
-    if (user) {
-      const email = user.email;
-      const name = user.displayName || email.split('@')[0];
-      const store = getGlobalStore();
-      store.currentUser = email;
-      if (!store.users[email]) {
-        store.users[email] = { email, debates: [], userProfile: createDefaultProfile(name) };
-      }
-      saveGlobalStore(store);
-      syncFromFirebase(email, user.uid).catch(e => console.warn('Auth sync:', e.message));
-      postLoginRouting();
+  
+  // User typing reset timer
+  const argInput = document.getElementById('argument-input');
+  if (argInput) {
+    argInput.addEventListener('input', () => resetUserTimer());
+    argInput.addEventListener('keydown', () => resetUserTimer());
+  }
+  
+  await initStore(); // Fetches config and inits Supabase
+  const currentUser = getCurrentUser();
+  if (!currentUser) {
+    navigate('login');
+  } else {
+    const store = getStore();
+    if (!store.debates || store.debates.length === 0) {
+      navigate('landing');
     } else {
-      navigate('login');
+      navigate('dashboard');
     }
-  });
+  }
 });
 
 // Auth Handlers
@@ -441,3 +735,188 @@ window.handleLogout = async function() {
   showToast('Logged out successfully.', 'info');
   navigate('login');
 };
+
+// ========== GAMIFICATION ==========
+const TOPICS = [
+  'Should artificial intelligence be regulated by governments?',
+  'Is social media doing more harm than good to society?',
+  'Should college education be free for everyone?',
+  'Is remote work better than office work?',
+  'Should voting be mandatory in democracies?',
+  'Is space exploration worth the investment?',
+  'Should animals be used for scientific research?',
+  'Is nuclear energy the solution to climate change?',
+  'Should there be limits on free speech online?',
+  'Is universal basic income a viable economic policy?',
+  'Should genetic engineering of humans be permitted?',
+  'Is capitalism the best economic system?',
+  'Should a wealth tax be implemented globally?',
+  'Are standardized tests a fair measure of intelligence?',
+  'Should healthcare be a fundamental human right?',
+  'Is a four-day work week better for the economy?',
+  'Should governments censor harmful content on the internet?',
+  'Is human cloning ethically justifiable?',
+  'Should the minimum wage be a living wage?',
+  'Are electric vehicles truly better for the environment?',
+  'Should public transportation be entirely free?',
+  'Is cryptocurrency the future of money?',
+  'Should schools ban the use of smartphones?',
+  'Is a vegetarian diet better for the planet?',
+  'Should billionaires exist in a fair society?'
+];
+
+function processDebateResult(analysis, speechData) {
+  const p = getProfile();
+  const newDebates = p.debatesCompleted + 1;
+  const newFallacies = p.totalFallaciesFound + (analysis.fallacies?.length || 0);
+  const newCounters = p.totalCounters + 1;
+  updateProfile({ debatesCompleted: newDebates, totalFallaciesFound: newFallacies, totalCounters: newCounters });
+  return [];
+}
+
+// ========== CHARTS ==========
+let radarChart = null, trendChart = null;
+
+function renderRadarChart(data) {
+  const ctx = document.getElementById('radar-chart');
+  if (!ctx) return;
+  if (radarChart) radarChart.destroy();
+  radarChart = new Chart(ctx, {
+    type: 'radar',
+    data: {
+      labels: ['Logic', 'Clarity', 'Persuasion', 'Evidence', 'Structure'],
+      datasets: [{
+        data: [data.logic, data.clarity, data.persuasion, data.evidence, data.structure],
+        backgroundColor: 'rgba(6,182,212,0.15)',
+        borderColor: '#06b6d4',
+        borderWidth: 2,
+        pointBackgroundColor: '#06b6d4',
+        pointRadius: 4,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        r: {
+          beginAtZero: true, max: 100,
+          grid: { color: 'rgba(255,255,255,0.06)' },
+          angleLines: { color: 'rgba(255,255,255,0.06)' },
+          pointLabels: { color: '#a0a0b8', font: { size: 12, weight: 500 } },
+          ticks: { display: false }
+        }
+      },
+      plugins: { legend: { display: false } }
+    }
+  });
+}
+
+function renderTrendChart(data) {
+  const ctx = document.getElementById('trend-chart');
+  if (!ctx) return;
+  if (trendChart) trendChart.destroy();
+  trendChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: data.map(d => '#' + d.debate),
+      datasets: [
+        { label: 'Score', data: data.map(d => d.score), borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.1)', tension: 0.4, borderWidth: 2, pointRadius: 4, fill: true },
+        { label: 'Logic', data: data.map(d => d.logic), borderColor: '#8b5cf6', borderDash: [5,5], tension: 0.4, borderWidth: 1.5, pointRadius: 0 },
+        { label: 'Clarity', data: data.map(d => d.clarity), borderColor: '#30d158', borderDash: [5,5], tension: 0.4, borderWidth: 1.5, pointRadius: 0 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#6b6b85', font: { size: 11 } } },
+        y: { min: 0, max: 100, grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#6b6b85', font: { size: 11 } } }
+      },
+      plugins: {
+        legend: { labels: { color: '#a0a0b8', usePointStyle: true, pointStyle: 'line', font: { size: 11 } } },
+        tooltip: { backgroundColor: 'rgba(18,18,26,0.9)', titleColor: '#f0f0f5', bodyColor: '#a0a0b8', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1 }
+      }
+    }
+  });
+}
+
+// ========== SPEECH RECOGNITION ==========
+let recognition = null;
+let speechStartTime = null;
+let speechTimerInterval = null;
+let isRecording = false;
+let finalTranscriptAccumulated = '';
+
+function initSpeech() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return false;
+  recognition = new SR();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+  recognition.onresult = handleSpeechResult;
+  recognition.onerror = (e) => {
+    console.warn('Speech recognition error:', e.error);
+    if (e.error !== 'no-speech' && e.error !== 'aborted') stopRecording();
+  };
+  recognition.onend = () => {
+    if (isRecording) {
+      try { recognition.start(); } catch(e) {}
+    }
+  };
+  return true;
+}
+
+function handleSpeechResult(event) {
+  let interim = '';
+  for (let i = event.resultIndex; i < event.results.length; i++) {
+    const transcript = event.results[i][0].transcript;
+    if (event.results[i].isFinal) {
+      finalTranscriptAccumulated += transcript + ' ';
+    } else {
+      interim += transcript;
+    }
+  }
+  const ta = document.getElementById('argument-input');
+  const tt = document.getElementById('transcript-text');
+  if (ta) ta.value = finalTranscriptAccumulated.trim();
+  if (tt) tt.textContent = interim || '...listening';
+  
+  if (typeof resetUserTimer === 'function') resetUserTimer();
+}
+
+function startRecording() {
+  if (!recognition && !initSpeech()) { showToast('Voice not supported. Use Chrome.', 'error'); return; }
+  isRecording = true;
+  finalTranscriptAccumulated = document.getElementById('argument-input').value;
+  if (finalTranscriptAccumulated) finalTranscriptAccumulated += ' ';
+  speechStartTime = Date.now();
+  document.getElementById('voice-btn').classList.add('recording');
+  document.getElementById('voice-status').textContent = 'Recording...';
+  document.getElementById('voice-timer').style.display = '';
+  document.getElementById('live-transcript').style.display = '';
+  speechTimerInterval = setInterval(() => {
+    const s = Math.floor((Date.now() - speechStartTime) / 1000);
+    document.getElementById('voice-timer').textContent = Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+  }, 1000);
+  try { recognition.start(); } catch(e) {}
+}
+
+function stopRecording() {
+  isRecording = false;
+  if (recognition) try { recognition.stop(); } catch(e) {}
+  clearInterval(speechTimerInterval);
+  document.getElementById('voice-btn').classList.remove('recording');
+  document.getElementById('voice-status').textContent = 'Click to speak';
+  document.getElementById('voice-timer').style.display = 'none';
+  document.getElementById('live-transcript').style.display = 'none';
+  const duration = speechStartTime ? Math.floor((Date.now() - speechStartTime) / 1000) : 0;
+  window.lastSpeechDuration = duration;
+  return { duration };
+}
+
+function toggleVoice() {
+  if (isRecording) stopRecording();
+  else startRecording();
+}
+// Initialize App - Logic moved to earlier DOMContentLoaded listener
+// document.addEventListener('DOMContentLoaded', initApp);

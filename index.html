@@ -6,21 +6,33 @@
     <meta name="description" content="DEBATE AI - Real-Time AI Debate Coach. Analyze arguments, detect fallacies, improve persuasion.">
     <title>DEBATE AI – Real-Time AI Debate Coach</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css?v=10">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-analytics-compat.js"></script>
     <script src="js/i18n.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/motion@10.16.2/dist/motion.js"></script>
 </head>
 <body>
+    <!-- Ambient Background Layer -->
+    <div class="ambient-glows">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+    <div class="grid-bg"></div>
+    
     <!-- LANDING PAGE -->
     <div id="page-landing" class="page active">
         <canvas id="particles-canvas"></canvas>
         <div class="landing-glow glow-1"></div>
         <div class="landing-glow glow-2"></div>
+
 
         <section class="hero">
             <div class="hero-badge animate-fade-in">
@@ -172,48 +184,75 @@
 
             <div class="debate-topic-bar glass-card">
                 <span class="topic-label">Topic:</span>
-                <input type="text" id="debate-topic" class="topic-input" value="Should artificial intelligence be regulated by governments?">
+                <input type="text" id="debate-topic" class="topic-input" placeholder="Enter a debate topic, or use the shuffle button ->">
                 <button class="btn-icon" onclick="randomizeTopic()" title="Random topic"><i data-lucide="shuffle"></i></button>
             </div>
 
+            <!-- Round + controls bar -->
+            <div id="debate-status-bar" class="debate-status-bar glass-card" style="display:none">
+                <div class="status-left">
+                    <span class="round-badge" id="round-badge">Round 1</span>
+                    <span class="status-text" id="debate-status-text">Debate in progress...</span>
+                </div>
+                <div class="status-right">
+                    <button class="btn-give-up" id="give-up-btn" onclick="giveUpDebate()"><i data-lucide="flag"></i> Give Up</button>
+                    <button class="btn-end-debate" id="end-debate-btn" onclick="endDebate()"><i data-lucide="square"></i> End Debate</button>
+                </div>
+            </div>
+
             <div class="debate-arena">
-                <div class="debate-input-panel glass-card">
-                    <h3>Your Argument</h3>
-                    <div class="voice-controls">
-                        <button id="voice-btn" class="voice-button" onclick="toggleVoice()">
-                            <i data-lucide="mic"></i>
-                            <div class="pulse-ring"></div>
-                        </button>
-                        <span id="voice-status" class="text-muted">Click to speak</span>
-                        <span id="voice-timer" class="voice-timer" style="display:none">0:00</span>
+                <!-- Conversation thread + input -->
+                <div class="debate-conversation-panel">
+                    <div class="debate-thread glass-card" id="debate-thread">
+                        <div id="thread-placeholder" class="thread-placeholder">
+                            <i data-lucide="message-square"></i>
+                            <p>Start the debate by submitting your opening argument below</p>
+                        </div>
+                        <div id="thread-messages" class="thread-messages"></div>
                     </div>
-                    <textarea id="argument-input" class="debate-textarea" placeholder="Type your argument here, or use voice input above..." rows="6" data-t="your_argument"></textarea>
-                    <div class="debate-actions">
-                        <button class="btn-primary" id="analyze-btn" onclick="submitArgument()" data-t="analyze_btn"><i data-lucide="brain"></i> Analyze Argument</button>
-                        <button class="btn-secondary" onclick="clearArgument()" data-t="clear_btn"><i data-lucide="rotate-ccw"></i> Clear</button>
-                    </div>
-                    <div id="live-transcript" class="live-transcript" style="display:none">
-                        <div class="transcript-label"><span class="rec-dot"></span> Live Transcript</div>
-                        <p id="transcript-text"></p>
+                    
+                    <div class="debate-input-panel glass-card" id="debate-input-panel">
+                        <div class="voice-controls">
+                            <button id="voice-btn" class="voice-button" onclick="toggleVoice()">
+                                <i data-lucide="mic"></i>
+                                <div class="pulse-ring"></div>
+                            </button>
+                            <span id="voice-status" class="text-muted">Click to speak</span>
+                            <span id="voice-timer" class="voice-timer" style="display:none">0:00</span>
+                        </div>
+                        <textarea id="argument-input" class="debate-textarea" placeholder="Type your argument here, or use voice input above..." rows="3" data-t="your_argument"></textarea>
+                        <div class="debate-actions">
+                            <button class="btn-primary" id="analyze-btn" onclick="submitArgument()" data-t="analyze_btn"><i data-lucide="send"></i> Submit Argument</button>
+                            <button class="btn-secondary" onclick="resetDebate()" id="new-debate-btn"><i data-lucide="plus"></i> New Debate</button>
+                        </div>
+                        <div id="live-transcript" class="live-transcript" style="display:none">
+                            <div class="transcript-label"><span class="rec-dot"></span> Live Transcript</div>
+                            <p id="transcript-text"></p>
+                        </div>
                     </div>
                 </div>
 
-                <div class="debate-results-panel">
+                <!-- Live scores sidebar -->
+                <div class="debate-scores-panel" id="debate-scores-panel">
                     <div id="analysis-placeholder" class="glass-card results-placeholder">
-                        <i data-lucide="message-square"></i>
-                        <p>Submit an argument to see AI analysis</p>
+                        <i data-lucide="bar-chart-3"></i>
+                        <p>Live scores appear after your first argument</p>
                     </div>
-                    <div id="analysis-results" style="display:none">
+                    <div id="live-scores" style="display:none">
                         <div class="glass-card score-overview">
+                            <h3><i data-lucide="target" style="color:#06b6d4"></i> Live Scores</h3>
                             <div class="score-gauges" id="score-gauges"></div>
                         </div>
-                        <div class="glass-card" id="argument-breakdown"></div>
-                        <div id="fallacy-alerts"></div>
-                        <div class="glass-card" id="ai-counter"></div>
+                        <div class="glass-card" id="fallacy-alerts"></div>
                         <div class="glass-card" id="suggestions-panel"></div>
                         <div id="speech-metrics-panel" style="display:none"></div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Final Report Overlay -->
+            <div id="debate-final-report" class="debate-final-report" style="display:none">
+                <div class="final-report-content glass-card" id="final-report-body"></div>
             </div>
         </main>
     </div>
@@ -236,11 +275,8 @@
     <div id="toast-container"></div>
 
 
-    <script src="js/store.js?v=3"></script>
-    <script src="js/api.js?v=3"></script>
-    <script src="js/speech.js?v=3"></script>
-    <script src="js/gamification.js?v=3"></script>
-    <script src="js/charts.js?v=3"></script>
-    <script src="js/app.js?v=3"></script>
+    <script src="js/store.js?v=12"></script>
+    <script src="js/api.js?v=12"></script>
+    <script src="js/app.js?v=12"></script>
 </body>
 </html>

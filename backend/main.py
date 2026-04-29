@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 # Add backend dir to path for imports
 sys.path.insert(0, os.path.dirname(__file__))
@@ -43,7 +43,17 @@ async def root():
 async def health():
     return {"status": "ok", "ai_available": bool(os.getenv("GEMINI_API_KEY"))}
 
-
+@app.get("/api/config")
+async def get_config():
+    return {
+        "apiKey": os.getenv("FIREBASE_API_KEY", ""),
+        "authDomain": os.getenv("FIREBASE_AUTH_DOMAIN", ""),
+        "projectId": os.getenv("FIREBASE_PROJECT_ID", ""),
+        "storageBucket": os.getenv("FIREBASE_STORAGE_BUCKET", ""),
+        "messagingSenderId": os.getenv("FIREBASE_MESSAGING_SENDER_ID", ""),
+        "appId": os.getenv("FIREBASE_APP_ID", ""),
+        "measurementId": os.getenv("FIREBASE_MEASUREMENT_ID", "")
+    }
 
 if __name__ == "__main__":
     import uvicorn
