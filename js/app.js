@@ -126,8 +126,13 @@ async function submitArgument() {
   btn.disabled = true;
   btn.innerHTML = '<span class="loading-spinner"></span> Thinking...';
 
+  // Add user argument to history
+  currentHistory.push({ role: 'user', content: text });
+
   // Stop recording if active and start speech analysis
   let speechPromise = Promise.resolve(null);
+  let speechData = null;
+  
   if (typeof isRecording !== 'undefined' && isRecording) {
     const r = stopRecording();
     if (r.duration > 2) {
@@ -147,16 +152,15 @@ async function submitArgument() {
     speechData = speechDataResult;
     
     if (analysis) {
-      // Use counter_argument from analysis (it's contextual now)
       const counterRes = {
         counter_argument: analysis.counter_argument,
         reasoning: analysis.counter_reasoning,
         status: analysis.status || 'ongoing'
       };
+      
       currentHistory.push({ role: 'ai', content: counterRes.counter_argument });
       debateStatus = counterRes.status || 'ongoing';
       
-      // Save debate session or update existing
       const debate = await addDebate({ 
         argument: text, 
         topic, 
@@ -168,28 +172,25 @@ async function submitArgument() {
         speechData 
       });
       currentDebateId = debate.id;
-
-      // Process debate stats
       processDebateResult(analysis, speechData);
-
-      // Render results
       renderAnalysisResults(analysis, counterRes, speechData);
       
       if (debateStatus !== 'ongoing') {
         const win = debateStatus === 'user_win';
         showToast(win ? "CONGRATULATIONS! You won the debate!" : "The AI has won this debate.", win ? "success" : "info");
       }
+    } else {
+      showToast("Could not analyze argument. Please try again.", "error");
     }
   } catch (e) {
-    console.error(e);
-    showToast("Error during analysis", "error");
+    console.error("Submit error:", e);
+    showToast("Error during analysis: " + e.message, "error");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i data-lucide="brain"></i> Continue Debate';
+    lucide.createIcons();
+    showToast(`Argument analyzed!`, 'success');
   }
-
-  btn.disabled = false;
-  btn.innerHTML = '<i data-lucide="brain"></i> Continue Debate';
-  lucide.createIcons();
-
-  showToast(`Argument analyzed!`, 'success');
 }
 
 function renderAnalysisResults(analysis, counter, speechData) {
