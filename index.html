@@ -124,8 +124,13 @@
                 </button>
             </div>
         </section>
-        <footer class="landing-footer"><span class="neon-text">⚡ DEBATE AI</span> <span>Built with AI • Powered by
-                Rhetoric • © 2026</span></footer>
+        <footer class="landing-footer">
+            <span class="neon-text">⚡ DEBATE AI</span> 
+            <span>Built with AI • Powered by Rhetoric • © 2026</span>
+            <a onclick="navigate('about')" style="cursor:pointer;color:var(--text-sec);text-decoration:none;margin-left:20px;display:flex;align-items:center;gap:4px">
+                <i data-lucide="info" style="width:14px;height:14px"></i> About Us
+            </a>
+        </footer>
     </div>
 
     <!-- LOGIN PAGE -->
@@ -206,6 +211,7 @@
                     Debate</a>
                 <a class="nav-link" onclick="navigate('profile')" data-t="profile"><i data-lucide="user"></i>
                     Profile</a>
+                <a class="nav-link" onclick="navigate('about')"><i data-lucide="info"></i> About</a>
                 <a class="nav-link" onclick="handleLogout()" style="color:var(--neon-pink);" data-t="logout"><i
                         data-lucide="log-out"></i> Logout</a>
             </div>
@@ -247,6 +253,7 @@
                         data-lucide="layout-dashboard"></i> Dashboard</a><a class="nav-link active"
                     onclick="navigate('debate')"><i data-lucide="swords"></i> Debate</a><a class="nav-link"
                     onclick="navigate('profile')"><i data-lucide="user"></i> Profile</a><a class="nav-link"
+                    onclick="navigate('about')"><i data-lucide="info"></i> About</a><a class="nav-link"
                     onclick="handleLogout()" style="color:var(--neon-pink);"><i data-lucide="log-out"></i> Logout</a>
             </div>
         </nav>
@@ -354,6 +361,7 @@
                         data-lucide="layout-dashboard"></i> Dashboard</a><a class="nav-link"
                     onclick="navigate('debate')"><i data-lucide="swords"></i> Debate</a><a class="nav-link"
                     onclick="navigate('profile')"><i data-lucide="user"></i> Profile</a><a class="nav-link"
+                    onclick="navigate('about')"><i data-lucide="info"></i> About Us</a><a class="nav-link"
                     onclick="handleLogout()" style="color:var(--neon-pink);"><i data-lucide="log-out"></i> Logout</a>
             </div>
         </nav>
@@ -376,10 +384,132 @@
                         data-lucide="layout-dashboard"></i> Dashboard</a><a class="nav-link"
                     onclick="navigate('debate')"><i data-lucide="swords"></i> Debate</a><a class="nav-link active"
                     onclick="navigate('profile')"><i data-lucide="user"></i> Profile</a><a class="nav-link"
+                    onclick="navigate('about')"><i data-lucide="info"></i> About Us</a><a class="nav-link"
                     onclick="handleLogout()" style="color:var(--neon-pink);"><i data-lucide="log-out"></i> Logout</a>
             </div>
         </nav>
         <main class="main-content" id="profile-content"></main>
+    </div>
+
+    <!-- ABOUT US PAGE -->
+    <div id="page-about" class="page">
+        <nav class="navbar glass-card"><a class="nav-logo" onclick="navigate('dashboard')"><span class="logo-icon"><i
+                        data-lucide="zap"></i></span><span class="neon-text nav-brand">DEBATE AI</span></a>
+            <div class="nav-links"><a class="nav-link" onclick="navigate('dashboard')"><i
+                        data-lucide="layout-dashboard"></i> Dashboard</a><a class="nav-link"
+                    onclick="navigate('debate')"><i data-lucide="swords"></i> Debate</a><a class="nav-link"
+                    onclick="navigate('profile')"><i data-lucide="user"></i> Profile</a><a class="nav-link active"
+                    onclick="navigate('about')"><i data-lucide="info"></i> About Us</a><a class="nav-link"
+                    onclick="handleLogout()" style="color:var(--neon-pink);"><i data-lucide="log-out"></i> Logout</a>
+            </div>
+        </nav>
+        <main class="main-content">
+            <div class="page-header" style="text-align: center; justify-content: center; flex-direction: column;">
+                <div class="hero-badge animate-fade-in" style="margin-bottom: 16px;">
+                    <i data-lucide="users"></i>
+                    <span>The Dream Team</span>
+                </div>
+                <h1 style="font-size: 3.5rem;">Meet the <span class="neon-text">Architects</span></h1>
+                <p class="text-muted" style="font-size: 1.2rem; max-width: 600px; margin: 0 auto;">The visionary engineers and analysts powering the next generation of rhetoric.</p>
+            </div>
+
+            <div class="team-grid">
+                <!-- Team Lead & Frontend -->
+                <div class="team-card lead" style="--delay: 0s;">
+                    <div class="neural-pattern"></div>
+                    <div class="team-card-content">
+                        <div class="team-card-icon"><i data-lucide="crown"></i></div>
+                        <div class="expertise-badges">
+                            <span class="badge">Architecture</span>
+                            <span class="badge">UX Design</span>
+                        </div>
+                        <h3>Jayanth D</h3>
+                        <span class="team-role">Team Lead & Frontend Architect</span>
+                        <p class="team-desc">Driving the technical vision and crafting the high-performance "Neural Void" user experience. Mastermind behind the glassmorphic interface and real-time interactions that define the platform's soul.</p>
+                        <div class="card-footer">
+                            <div class="social-links">
+                                <i data-lucide="github"></i>
+                                <i data-lucide="linkedin"></i>
+                                <i data-lucide="twitter"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Backend -->
+                <div class="team-card backend" style="--delay: 0.2s;">
+                    <div class="neural-pattern"></div>
+                    <div class="team-card-content">
+                        <div class="team-card-icon"><i data-lucide="database"></i></div>
+                        <div class="expertise-badges">
+                            <span class="badge">FastAPI</span>
+                            <span class="badge">PostgreSQL</span>
+                        </div>
+                        <h3>Dhanush R</h3>
+                        <span class="team-role">Backend Engineer</span>
+                        <p class="team-desc">Architecting the robust server-side logic and high-concurrency database systems. Ensuring seamless data flow and security across the entire analytical engine.</p>
+                        <div class="card-footer">
+                            <div class="social-links">
+                                <i data-lucide="github"></i>
+                                <i data-lucide="code-2"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Analyst 1 -->
+                <div class="team-card ai-1" style="--delay: 0.4s;">
+                    <div class="neural-pattern"></div>
+                    <div class="team-card-content">
+                        <div class="team-card-icon"><i data-lucide="brain"></i></div>
+                        <div class="expertise-badges">
+                            <span class="badge">NLP</span>
+                            <span class="badge">Logic</span>
+                        </div>
+                        <h3>Karkik</h3>
+                        <span class="team-role">AI Analyst</span>
+                        <p class="team-desc">Expert in fallacy detection logic and neural training. Fine-tuning the AI to provide sharp, logically sound counterarguments that challenge even the best debaters.</p>
+                        <div class="card-footer">
+                            <div class="social-links">
+                                <i data-lucide="brain-circuit"></i>
+                                <i data-lucide="github"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Analyst 2 -->
+                <div class="team-card ai-2" style="--delay: 0.6s;">
+                    <div class="neural-pattern"></div>
+                    <div class="team-card-content">
+                        <div class="team-card-icon"><i data-lucide="sparkles"></i></div>
+                        <div class="expertise-badges">
+                            <span class="badge">Ethics</span>
+                            <span class="badge">Psychology</span>
+                        </div>
+                        <h3>Neha H</h3>
+                        <span class="team-role">AI Analyst</span>
+                        <p class="team-desc">Focusing on psychological persuasion metrics and linguistic clarity. Refining the AI's ability to evaluate the emotional impact and structural integrity of every argument.</p>
+                        <div class="card-footer">
+                            <div class="social-links">
+                                <i data-lucide="heart"></i>
+                                <i data-lucide="linkedin"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="glass-card" style="margin-top: 60px; text-align: center; border-bottom: 4px solid var(--primary);">
+                <div style="font-size: 2rem; margin-bottom: 16px;">🎯</div>
+                <h3>Our Mission</h3>
+                <p class="text-sec" style="max-width: 800px; margin: 16px auto; line-height: 1.8; font-size: 1.1rem;">
+                    At DEBATE AI, we believe in sharpening the most powerful tool humans possess: <strong>Reasoning</strong>. 
+                    Our platform is built to help thinkers, students, and leaders analyze their thoughts, 
+                    detect logical traps, and become the most persuasive version of themselves.
+                </p>
+            </div>
+        </main>
     </div>
 
     <div id="toast-container"></div>

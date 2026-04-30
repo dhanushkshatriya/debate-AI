@@ -635,6 +635,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   lucide.createIcons();
   randomizeTopic();
   
+  // Interactive Team Cards Glow
+  document.addEventListener('mousemove', e => {
+    const cards = document.querySelectorAll('.team-card');
+    cards.forEach(card => {
+      const rect = card.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 100;
+      const y = ((e.clientY - rect.top) / rect.height) * 100;
+      card.style.setProperty('--mouse-x', `${x}%`);
+      card.style.setProperty('--mouse-y', `${y}%`);
+    });
+  });
+  
   // User typing reset timer
   const argInput = document.getElementById('argument-input');
   if (argInput) {
