@@ -1,5 +1,7 @@
 // API service with client-side fallback analysis and FAST timeouts
-const API_BASE = '/api';
+const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? '/api'
+  : 'https://debate-ai-5ofm.onrender.com/api';
 const FETCH_TIMEOUT = 30000; // 30 second max
 
 const FALLACY_PATTERNS = [

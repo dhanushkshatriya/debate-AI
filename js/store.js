@@ -5,7 +5,10 @@ let auth = null;
 
 async function initStore() {
   try {
-    const res = await fetch('/api/config');
+    const configUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      ? '/api/config'
+      : 'https://debate-ai-5ofm.onrender.com/api/config';
+    const res = await fetch(configUrl);
     const config = await res.json();
     if (config.apiKey) {
       // Initialize Firebase
