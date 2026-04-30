@@ -673,12 +673,12 @@ window.toggleAuthMode = function(mode) {
   if (mode === 'login') {
     tabs[0].classList.add('active');
     document.getElementById('group-name').style.display = 'none';
-    document.getElementById('auth-submit-btn').innerHTML = `<span>Login</span> <i data-lucide="arrow-right"></i>`;
+    document.getElementById('auth-submit-btn').innerHTML = `<span>Login to Arena</span> <i data-lucide="arrow-right"></i>`;
   } else {
     tabs[1].classList.add('active');
     document.getElementById('group-name').style.display = 'block';
     document.getElementById('auth-name').required = true;
-    document.getElementById('auth-submit-btn').innerHTML = `<span>Sign Up</span> <i data-lucide="arrow-right"></i>`;
+    document.getElementById('auth-submit-btn').innerHTML = `<span>Create Neural ID</span> <i data-lucide="arrow-right"></i>`;
   }
   lucide.createIcons();
 };
@@ -717,7 +717,7 @@ window.handleAuthSubmit = async function() {
   
   const btn = document.getElementById('auth-submit-btn');
   btn.disabled = false;
-  btn.innerHTML = authMode === 'login' ? `<span>Login</span> <i data-lucide="arrow-right"></i>` : `<span>Sign Up</span> <i data-lucide="arrow-right"></i>`;
+  btn.innerHTML = authMode === 'login' ? `<span>Login to Arena</span> <i data-lucide="arrow-right"></i>` : `<span>Create Neural ID</span> <i data-lucide="arrow-right"></i>`;
   lucide.createIcons();
 };
 
@@ -734,6 +734,14 @@ window.handleLogout = async function() {
   await logoutUser();
   showToast('Logged out successfully.', 'info');
   navigate('login');
+};
+
+window.confirmClearData = function() {
+  if (confirm("Are you sure you want to clear ALL local data? This will log you out and delete your history on this device.")) {
+    localStorage.removeItem('debate_ai_store');
+    showToast('All local data cleared.', 'success');
+    setTimeout(() => location.reload(), 1000);
+  }
 };
 
 // ========== GAMIFICATION ==========
